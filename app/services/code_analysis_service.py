@@ -1,5 +1,6 @@
 """
 Code analysis service for detecting issues in source code.
+Supports multiple languages: Python, JavaScript/TypeScript, Java, C#, Go, and more.
 """
 
 import logging
@@ -10,19 +11,21 @@ from typing import List
 
 from app.models.schemas import CodeIssue, CodeAnalysisResponse
 from app.core.config import TEMP_UPLOAD_DIR, MAX_UPLOAD_SIZE, ALLOWED_CODE_EXTENSIONS
-from app.utils.validators import is_code_file, detect_blocking_patterns, detect_request_timeout
+from app.utils.validators import is_code_file
+from app.services.multi_language_analyzer import MultiLanguageCodeAnalyzer
 
 logger = logging.getLogger(__name__)
 
 
 class CodeAnalysisService:
-    """Service for analyzing source code for issues."""
+    """Service for analyzing source code for issues across multiple languages."""
     
     def __init__(self):
         """Initialize code analysis service."""
         self.temp_dir = TEMP_UPLOAD_DIR
         self.max_size = MAX_UPLOAD_SIZE
         self.allowed_extensions = ALLOWED_CODE_EXTENSIONS
+        self.multi_analyzer = MultiLanguageCodeAnalyzer()
     
     async def analyze_zip_file(self, file_path: str) -> CodeAnalysisResponse:
         """
@@ -139,7 +142,7 @@ class CodeAnalysisService:
     
     async def _analyze_file(self, file_path: Path) -> List[CodeIssue]:
         """
-        Analyze a single file for issues.
+        Analyze a single file for issues using language-specific analyzers.
         
         Args:
             file_path: Path to file
@@ -157,94 +160,21 @@ class CodeAnalysisService:
             return issues
         
         # Relative path for display
-        rel_path = str(file_path.relative_to(self.temp_dir))
+        rel_path = str(file_path.name)
         
-        # Check for blocking patterns
-        blocking = detect_blocking_patterns(content)
-        for issue_msg in blocking:
-            issues.append(CodeIssue(
-                file=rel_path,
-                issue=issue_msg,
-                suggestion="Use httpx with async/await for non-blocking HTTP calls"
-            ))
-        
-        # Check for missing try/except in critical sections
-        issues.extend(self._check_error_handling(content, rel_path))
-        
-        # Check for timeout in requests
-        issues.extend(self._check_timeouts(content, rel_path))
-        
-        # Check for other common issues
-        issues.extend(self._check_other_issues(content, rel_path))
-        
-        return issues
-    
-    def _check_error_handling(self, content: str, file_path: str) -> List[CodeIssue]:
-        """Check for missing error handling."""
-        issues = []
-        
-        # Check for requests/httpx calls without try/except (simplified heuristic)
-        if re.search(r"(requests\.|httpx\.|aiohttp\.)" , content):
-            # Find lines with requests
-            lines = content.split("\n")
-            for i, line in enumerate(lines, 1):
-                if re.search(r"(requests\.|httpx\.|aiohttp\.)", line):
-                    # Check if it's in a try block (simple check)
-                    context = "\n".join(lines[max(0, i-5):i])
-                    if "try:" not in context:
-                        issues.append(CodeIssue(
-                            file=file_path,
-                            line_number=i,
-                            issue="HTTP request without error handling",
-                            suggestion="Wrap HTTP calls in try/except block to handle network errors and timeouts"
-                        ))
-        
-        return issues
-    
-    def _check_timeouts(self, content: str, file_path: str) -> List[CodeIssue]:
-        """Check for missing timeout specifications."""
-        issues = []
-        
-        if "httpx" in content and not detect_request_timeout(content):
-            # Find httpx calls without timeout
-            lines = content.split("\n")
-            for i, line in enumerate(lines, 1):
-                if "httpx." in line and "timeout" not in line:
-                    issues.append(CodeIssue(
-                        file=file_path,
-                        line_number=i,
-                        issue="httpx call without explicit timeout",
-                        suggestion="Add timeout parameter to prevent hanging requests (e.g., timeout=30)"
-                    ))
-        
-        return issues
-    
-    def _check_other_issues(self, content: str, file_path: str) -> List[CodeIssue]:
-        """Check for other common issues."""
-        issues = []
-        
-        # Check for infinite loops (simplified check)
-        if re.search(r"while\s+True\s*:", content):
-            lines = content.split("\n")
-            for i, line in enumerate(lines, 1):
-                if re.search(r"while\s+True\s*:", line):
-                    issues.append(CodeIssue(
-                        file=file_path,
-                        line_number=i,
-                        issue="Infinite loop detected",
-                        suggestion="Add proper loop termination condition or break statement"
-                    ))
-        
-        # Check for hardcoded credentials
-        if re.search(r"(password|api_key|secret|token)\s*=\s*['\"]([^'\"]+)['\"]", content):
-            lines = content.split("\n")
-            for i, line in enumerate(lines, 1):
-                if re.search(r"(password|api_key|secret|token)\s*=\s*['\"]([^'\"]+)['\"]", line):
-                    issues.append(CodeIssue(
-                        file=file_path,
-                        line_number=i,
-                        issue="Potential hardcoded credentials detected",
-                        suggestion="Use environment variables or configuration management for sensitive data"
-                    ))
+        # Use multi-language analyzer
+        try:
+            analysis_issues = self.multi_analyzer.analyze(content, str(file_path))
+            
+            # Convert to CodeIssue objects
+            for issue in analysis_issues:
+                issues.append(CodeIssue(
+                    file=rel_path,
+                    line_number=issue.get("line"),
+                    issue=issue.get("issue", "Unknown issue"),
+                    suggestion=issue.get("suggestion", "Review the code")
+                ))
+        except Exception as e:
+            logger.error(f"Error analyzing file {file_path}: {e}")
         
         return issues

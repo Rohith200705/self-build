@@ -5,6 +5,7 @@ from app.services.code_analysis_service import CodeAnalysisService
 from app.services.github_service import GitHubAnalysisService
 from app.services.suggestion_service import SuggestionEngine
 from app.services.report_service import ReportGenerationService
+from app.services.multi_language_analyzer import MultiLanguageCodeAnalyzer
 
 __all__ = [
     "HealthCheckService",
@@ -13,4 +14,5 @@ __all__ = [
     "GitHubAnalysisService",
     "SuggestionEngine",
     "ReportGenerationService",
+    "MultiLanguageCodeAnalyzer",
 ]
